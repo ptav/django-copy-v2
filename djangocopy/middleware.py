@@ -3,7 +3,7 @@ from django.conf import settings
 from django.shortcuts import redirect
 from django.utils.translation import to_locale, get_language
 from .models import Copy, PageVisit
-from .utils import get_ip_address, get_client_country_code
+from .utils import get_ip_address, get_client_country_code, ip_to_location, ip_to_organization
 from .cookies import CookieConsentForm, cookie_consent
 
 class CopyMiddleware:
@@ -59,6 +59,8 @@ class TrackMiddleware:
             session = request.session.session_key
             device_info = self.get_device_info(user_agent_string)
             language = get_language()
+            location = ip_to_location(ip)
+            organization = ip_to_organization(ip)
 
             PageVisit.objects.create(
                 url=url,
@@ -70,6 +72,9 @@ class TrackMiddleware:
                 session=session,
                 device_info=device_info,
                 language=language,
+                country_code=location.get('country_code', ''),
+                city=location.get('city', ''),
+                organization=organization,
             )
 
         except Exception as err:

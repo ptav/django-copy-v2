@@ -1,8 +1,14 @@
 import re
+from datetime import timedelta
 from django import forms
 from django.shortcuts import redirect
+from django.urls import path
+from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.contrib import admin
+from django.db.models import Count
+from django.db.models.functions import TruncDate
+from django.template.response import TemplateResponse
 
 from django_summernote.widgets import SummernoteWidget
 
@@ -114,9 +120,11 @@ class CopyAdmin(admin.ModelAdmin):
 
 @admin.register(PageVisit)
 class PageVisitAdmin(admin.ModelAdmin):
-    list_display = ('time', 'url', 'status_code', 'user', 'ip')
-    list_filter = ('status_code', )
-    search_fields = ('url', 'referrer', 'user_agent')
+    list_display = ('time', 'url', 'status_code', 'user', 'ip', 'city', 'country_code', 'organization')
+    list_filter = ('status_code', 'country_code')
+    search_fields = ('url', 'referrer', 'user_agent', 'city', 'organization')
+    change_list_template = 'admin/djangocopy/pagevisit/change_list.html'
+
     def get_readonly_fields(self, request, obj=None):
         return [f.name for f in self.model._meta.get_fields()]
 
@@ -128,6 +136,65 @@ class PageVisitAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def get_urls(self):
+        custom_urls = [
+            path('dashboard/', self.admin_site.admin_view(self.dashboard_view), name='djangocopy_pagevisit_dashboard'),
+        ]
+        return custom_urls + super().get_urls()
+
+    def dashboard_view(self, request):
+        "Aggregate PageVisit data (traffic over time, top pages, locations, and organisations) for the visits dashboard"
+
+        try:
+            days = int(request.GET.get('days', 30))
+        except ValueError:
+            days = 30
+        since = timezone.now() - timedelta(days=days)
+
+        qs = PageVisit.objects.filter(time__gte=since)
+
+        daily = list(
+            qs.annotate(day=TruncDate('time'))
+              .values('day')
+              .annotate(count=Count('id'))
+              .order_by('day')
+        )
+        top_pages = list(qs.values('url').annotate(count=Count('id')).order_by('-count')[:10])
+        top_countries = list(
+            qs.exclude(country_code='')
+              .values('country_code')
+              .annotate(count=Count('id'))
+              .order_by('-count')[:10]
+        )
+        top_organizations = list(
+            qs.exclude(organization='')
+              .values('organization')
+              .annotate(count=Count('id'))
+              .order_by('-count')[:10]
+        )
+        top_devices = list(qs.values('device_info').annotate(count=Count('id')).order_by('-count')[:10])
+
+        def with_pct(rows):
+            top = max((row['count'] for row in rows), default=0)
+            return [{**row, 'pct': (row['count'] * 100 // top) if top else 0} for row in rows]
+
+        context = {
+            **self.admin_site.each_context(request),
+            'title': 'Page visit dashboard',
+            'opts': self.model._meta,
+            'days': days,
+            'total_visits': qs.count(),
+            'unique_ips': qs.values('ip').distinct().count(),
+            'unique_sessions': qs.exclude(session__isnull=True).values('session').distinct().count(),
+            'unlocated_visits': qs.filter(country_code='').count(),
+            'daily': with_pct(daily),
+            'top_pages': with_pct(top_pages),
+            'top_countries': with_pct(top_countries),
+            'top_organizations': with_pct(top_organizations),
+            'top_devices': with_pct(top_devices),
+        }
+        return TemplateResponse(request, 'admin/djangocopy/pagevisit/dashboard.html', context)
 
 
 @admin.register(Redirect)

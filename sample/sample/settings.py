@@ -183,8 +183,13 @@ DJANGOCOPY_USE_CDN = True
 
 # GeoIP2
 #
+# Path to a directory of MaxMind GeoLite2/GeoIP2 .mmdb files. GeoLite2-City.mmdb
+# resolves visitor location (country/city); GeoLite2-ASN.mmdb resolves the
+# organisation/ISP that owns a visitor's IP for the page visits dashboard.
+# Free databases: https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
 
 #GEOIP_PATH = BASE_DIR.joinpath('assets', 'geoip')
+#DJANGOCOPY_GEOIP_ASN_DB = 'GeoLite2-ASN.mmdb'
 
 
 # django.contrib.auth settings

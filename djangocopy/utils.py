@@ -1,6 +1,10 @@
+import os
+import ipaddress
 from html2text import html2text as h2t
 from django.conf import settings
 from django.contrib.gis.geoip2 import GeoIP2
+from geoip2.database import Reader as ASNReader
+from geoip2.errors import AddressNotFoundError
 
 
 def choices_as_string(choices, param, default="--"):
@@ -48,3 +52,65 @@ def ip_to_country_code(addr, default_code='GB'):
 def get_client_country_code(request):
     "Shorthand to request country code directly from request"
     return ip_to_country_code(get_ip_address(request))
+
+
+def _is_local_address(addr):
+    "True for loopback/private addresses, which GeoIP databases can't resolve"
+    if addr in ('127.0.0.1', 'localhost', '::1'):
+        return True
+    try:
+        ip = ipaddress.ip_address(addr)
+        return ip.is_private or ip.is_loopback
+    except ValueError:
+        return True
+
+
+def ip_to_location(addr):
+    "Map an IP address to a city-level location using GeoIP2's City database"
+
+    if not hasattr(settings, 'GEOIP_PATH') or _is_local_address(addr):
+        return {}
+
+    g = GeoIP2(path=settings.GEOIP_PATH)
+    try:
+        city = g.city(addr)
+    except Exception:
+        return {}
+
+    return {
+        'country_code': city.get('country_code') or '',
+        'city': city.get('city') or '',
+    }
+
+
+_asn_reader = None
+
+def _get_asn_reader():
+    "Lazily open (and cache) the GeoLite2 ASN database used to resolve IP -> organisation"
+    global _asn_reader
+
+    if _asn_reader is None and hasattr(settings, 'GEOIP_PATH'):
+        db_name = getattr(settings, 'DJANGOCOPY_GEOIP_ASN_DB', 'GeoLite2-ASN.mmdb')
+        path = os.path.join(str(settings.GEOIP_PATH), db_name)
+        if os.path.exists(path):
+            _asn_reader = ASNReader(path)
+
+    return _asn_reader
+
+
+def ip_to_organization(addr):
+    "Map an IP address to the organisation (ISP/network operator) that owns it, via GeoIP2's ASN database"
+
+    if _is_local_address(addr):
+        return ''
+
+    reader = _get_asn_reader()
+    if reader is None:
+        return ''
+
+    try:
+        return reader.asn(addr).autonomous_system_organization or ''
+    except AddressNotFoundError:
+        return ''
+    except Exception:
+        return ''

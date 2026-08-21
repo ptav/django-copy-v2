@@ -1,0 +1,141 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate "Home" %}</a>
+  &rsaquo; <a href="{% url 'admin:djangocopy_pagevisit_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {% translate "Dashboard" %}
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+  #djangocopy-dashboard { max-width: 1100px; }
+  #djangocopy-dashboard .dc-ranges { margin-bottom: 20px; }
+  #djangocopy-dashboard .dc-ranges a {
+    display: inline-block; margin-right: 8px; padding: 4px 10px;
+    border: 1px solid var(--border-color, #ccc); border-radius: 4px; text-decoration: none;
+  }
+  #djangocopy-dashboard .dc-ranges a.active { background: var(--primary, #79aec8); color: var(--header-link-color, #fff); }
+  #djangocopy-dashboard .dc-stats {
+    display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 28px;
+  }
+  #djangocopy-dashboard .dc-stat {
+    flex: 1 1 180px; padding: 14px 16px; border: 1px solid var(--border-color, #ccc); border-radius: 6px;
+  }
+  #djangocopy-dashboard .dc-stat .dc-value { font-size: 26px; font-weight: bold; line-height: 1.2; }
+  #djangocopy-dashboard .dc-stat .dc-label { color: var(--body-quiet-color, #666); font-size: 12px; text-transform: uppercase; }
+  #djangocopy-dashboard .dc-panel {
+    border: 1px solid var(--border-color, #ccc); border-radius: 6px; padding: 16px; margin-bottom: 24px;
+  }
+  #djangocopy-dashboard .dc-panel h2 { margin-top: 0; font-size: 15px; }
+  #djangocopy-dashboard .dc-chart {
+    display: flex; align-items: flex-end; gap: 3px; height: 120px; border-bottom: 1px solid var(--border-color, #ccc);
+  }
+  #djangocopy-dashboard .dc-bar {
+    flex: 1 1 auto; background: var(--primary, #79aec8); min-height: 1px; min-width: 2px;
+  }
+  #djangocopy-dashboard .dc-chart-empty { color: var(--body-quiet-color, #666); padding: 20px 0; }
+  #djangocopy-dashboard .dc-rows { list-style: none; margin: 0; padding: 0; }
+  #djangocopy-dashboard .dc-rows li { margin-bottom: 8px; }
+  #djangocopy-dashboard .dc-row-head {
+    display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 2px;
+  }
+  #djangocopy-dashboard .dc-row-track {
+    background: var(--darkened-bg, #f4f4f4); border-radius: 3px; height: 8px; overflow: hidden;
+  }
+  #djangocopy-dashboard .dc-row-fill { background: var(--primary, #79aec8); height: 100%; }
+  #djangocopy-dashboard .dc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 800px) { #djangocopy-dashboard .dc-grid { grid-template-columns: 1fr; } }
+</style>
+
+<div id="djangocopy-dashboard">
+  <div class="dc-ranges">
+    <a href="?days=7" class="{% if days == 7 %}active{% endif %}">{% translate "7 days" %}</a>
+    <a href="?days=30" class="{% if days == 30 %}active{% endif %}">{% translate "30 days" %}</a>
+    <a href="?days=90" class="{% if days == 90 %}active{% endif %}">{% translate "90 days" %}</a>
+    <a href="?days=365" class="{% if days == 365 %}active{% endif %}">{% translate "365 days" %}</a>
+  </div>
+
+  <div class="dc-stats">
+    <div class="dc-stat"><div class="dc-value">{{ total_visits }}</div><div class="dc-label">{% translate "Visits" %}</div></div>
+    <div class="dc-stat"><div class="dc-value">{{ unique_sessions }}</div><div class="dc-label">{% translate "Unique sessions" %}</div></div>
+    <div class="dc-stat"><div class="dc-value">{{ unique_ips }}</div><div class="dc-label">{% translate "Unique IPs" %}</div></div>
+    <div class="dc-stat"><div class="dc-value">{{ unlocated_visits }}</div><div class="dc-label">{% translate "Without location" %}</div></div>
+  </div>
+
+  <div class="dc-panel">
+    <h2>{% translate "Visits over time" %}</h2>
+    {% if daily %}
+    <div class="dc-chart">
+      {% for row in daily %}
+      <div class="dc-bar" style="height: {{ row.pct }}%" title="{{ row.day }}: {{ row.count }}"></div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="dc-chart-empty">{% translate "No visits recorded in this period." %}</p>
+    {% endif %}
+  </div>
+
+  <div class="dc-panel">
+    <h2>{% translate "Top pages" %}</h2>
+    <ul class="dc-rows">
+      {% for row in top_pages %}
+      <li>
+        <div class="dc-row-head"><span>{{ row.url }}</span><span>{{ row.count }}</span></div>
+        <div class="dc-row-track"><div class="dc-row-fill" style="width: {{ row.pct }}%"></div></div>
+      </li>
+      {% empty %}
+      <li>{% translate "No data." %}</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="dc-grid">
+    <div class="dc-panel">
+      <h2>{% translate "Top locations" %}</h2>
+      <p class="help">{% translate "Country derived from visitor IP address via GeoIP2." %}</p>
+      <ul class="dc-rows">
+        {% for row in top_countries %}
+        <li>
+          <div class="dc-row-head"><span>{{ row.country_code }}</span><span>{{ row.count }}</span></div>
+          <div class="dc-row-track"><div class="dc-row-fill" style="width: {{ row.pct }}%"></div></div>
+        </li>
+        {% empty %}
+        <li>{% translate "No location data. Set GEOIP_PATH to enable IP geolocation." %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="dc-panel">
+      <h2>{% translate "Top organisations" %}</h2>
+      <p class="help">{% translate "Network/ISP owning the visitor's IP, derived from the GeoIP2 ASN database." %}</p>
+      <ul class="dc-rows">
+        {% for row in top_organizations %}
+        <li>
+          <div class="dc-row-head"><span>{{ row.organization }}</span><span>{{ row.count }}</span></div>
+          <div class="dc-row-track"><div class="dc-row-fill" style="width: {{ row.pct }}%"></div></div>
+        </li>
+        {% empty %}
+        <li>{% translate "No organisation data. Add GeoLite2-ASN.mmdb under GEOIP_PATH to enable it." %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <div class="dc-panel">
+    <h2>{% translate "Devices" %}</h2>
+    <ul class="dc-rows">
+      {% for row in top_devices %}
+      <li>
+        <div class="dc-row-head"><span>{{ row.device_info|default:"Unknown" }}</span><span>{{ row.count }}</span></div>
+        <div class="dc-row-track"><div class="dc-row-fill" style="width: {{ row.pct }}%"></div></div>
+      </li>
+      {% empty %}
+      <li>{% translate "No data." %}</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

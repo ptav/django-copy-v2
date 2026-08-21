@@ -185,6 +185,10 @@ class PageVisit(models.Model):
     device_info = models.TextField()
     language = models.CharField(max_length=5)
 
+    country_code = models.CharField(max_length=2, blank=True, help_text="Country derived from the visitor's IP address")
+    city = models.CharField(max_length=255, blank=True, help_text="City derived from the visitor's IP address")
+    organization = models.CharField(max_length=255, blank=True, help_text="Network/ISP that owns the visitor's IP address")
+
     def __str__(self):
         return f'{self.time} {self.user} {self.status_code} {self.url}'
 
