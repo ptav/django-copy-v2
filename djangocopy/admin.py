@@ -1,12 +1,15 @@
 import re
 from datetime import timedelta
+from urllib.parse import urlsplit
+
 from django import forms
+from django.http import JsonResponse
 from django.shortcuts import redirect
-from django.urls import path
+from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.contrib import admin
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from django.template.response import TemplateResponse
 
@@ -120,9 +123,11 @@ class CopyAdmin(admin.ModelAdmin):
 
 @admin.register(PageVisit)
 class PageVisitAdmin(admin.ModelAdmin):
-    list_display = ('time', 'url', 'status_code', 'user', 'ip', 'city', 'country_code', 'organization')
+    route_autocomplete_limit = 20
+
+    list_display = ('time', 'route', 'status_code', 'user', 'ip', 'city', 'country_code', 'organization')
     list_filter = ('status_code', 'country_code')
-    search_fields = ('url', 'referrer', 'user_agent', 'city', 'organization')
+    search_fields = ('route', 'referrer', 'user_agent', 'city', 'organization')
     change_list_template = 'admin/djangocopy/pagevisit/change_list.html'
 
     def get_readonly_fields(self, request, obj=None):
@@ -140,8 +145,74 @@ class PageVisitAdmin(admin.ModelAdmin):
     def get_urls(self):
         custom_urls = [
             path('dashboard/', self.admin_site.admin_view(self.dashboard_view), name='djangocopy_pagevisit_dashboard'),
+            path(
+                'dashboard/routes/',
+                self.admin_site.admin_view(self.route_autocomplete_view),
+                name='djangocopy_pagevisit_route_autocomplete',
+            ),
         ]
         return custom_urls + super().get_urls()
+
+    @staticmethod
+    def normalize_route(route):
+        """Normalize a route filter to the path stored on PageVisit."""
+        value = (route or '').strip()
+        if not value:
+            return ''
+
+        try:
+            route = urlsplit(value).path
+        except ValueError:
+            return ''
+
+        if not route:
+            return '/'
+        return route if route.startswith('/') else f'/{route}'
+
+    def route_autocomplete_view(self, request):
+        """Return a small set of matching visited and published redirect routes."""
+        term = request.GET.get('q', '').strip()[:255]
+        term_lower = term.lower()
+        candidates = {}
+
+        redirects = Redirect.objects.all()
+        if term:
+            # A route search commonly ends in the redirect slug. Searching the
+            # label and destination also makes named campaigns easy to find.
+            slug_term = term.rstrip('/').rsplit('/', 1)[-1]
+            redirects = redirects.filter(
+                Q(slug__icontains=slug_term)
+                | Q(label__icontains=term)
+                | Q(destination_url__icontains=term)
+            )
+
+        for published_redirect in redirects.order_by('slug')[:self.route_autocomplete_limit * 2]:
+            route = reverse('tracked_redirect', args=[published_redirect.slug])
+            label = route
+            if published_redirect.label:
+                label += f' — {published_redirect.label}'
+            label += f' → {published_redirect.destination_url}'
+            candidates[route] = {'value': route, 'label': label}
+
+        visited_routes = PageVisit.objects.all()
+        if term:
+            visited_routes = visited_routes.filter(route__icontains=term)
+        visited_routes = (
+            visited_routes.order_by('route')
+            .values_list('route', flat=True)
+            .distinct()[:self.route_autocomplete_limit * 5]
+        )
+        for route in visited_routes:
+            if not route:
+                continue
+            candidates.setdefault(route, {'value': route, 'label': route})
+
+        def sort_key(candidate):
+            value = candidate['value'].lower()
+            return (0 if value.startswith(term_lower) else 1, value)
+
+        results = sorted(candidates.values(), key=sort_key)[:self.route_autocomplete_limit]
+        return JsonResponse({'results': results})
 
     def dashboard_view(self, request):
         "Aggregate PageVisit data (traffic over time, top pages, locations, and organisations) for the visits dashboard"
@@ -153,6 +224,9 @@ class PageVisitAdmin(admin.ModelAdmin):
         since = timezone.now() - timedelta(days=days)
 
         qs = PageVisit.objects.filter(time__gte=since)
+        route = self.normalize_route(request.GET.get('route', ''))
+        if route:
+            qs = qs.filter(route=route)
 
         daily = list(
             qs.annotate(day=TruncDate('time'))
@@ -160,7 +234,7 @@ class PageVisitAdmin(admin.ModelAdmin):
               .annotate(count=Count('id'))
               .order_by('day')
         )
-        top_pages = list(qs.values('url').annotate(count=Count('id')).order_by('-count')[:10])
+        top_pages = list(qs.values('route').annotate(count=Count('id')).order_by('-count')[:10])
         top_countries = list(
             qs.exclude(country_code='')
               .values('country_code')
@@ -184,6 +258,8 @@ class PageVisitAdmin(admin.ModelAdmin):
             'title': 'Page visit dashboard',
             'opts': self.model._meta,
             'days': days,
+            'route': route,
+            'route_autocomplete_url': reverse('admin:djangocopy_pagevisit_route_autocomplete'),
             'total_visits': qs.count(),
             'unique_ips': qs.values('ip').distinct().count(),
             'unique_sessions': qs.exclude(session__isnull=True).values('session').distinct().count(),

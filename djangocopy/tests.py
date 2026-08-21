@@ -118,7 +118,7 @@ class MiddlewareTests(TestCase):
 
     def test_tracking_records_successful_visit(self):
         request = add_session(self.factory.get(
-            '/tracked/',
+            '/tracked/?campaign=summer',
             REMOTE_ADDR='203.0.113.9',
             HTTP_SEC_FETCH_DEST='document',
             HTTP_USER_AGENT='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
@@ -129,6 +129,7 @@ class MiddlewareTests(TestCase):
         TrackMiddleware(lambda req: HttpResponse('ok'))(request)
 
         visit = PageVisit.objects.get()
+        self.assertEqual(visit.route, '/tracked/')
         self.assertEqual(visit.ip, '203.0.113.9')
         self.assertEqual(visit.status_code, 200)
         self.assertEqual(visit.referrer, 'https://example.com/source')
@@ -190,7 +191,7 @@ class MiddlewareTests(TestCase):
 
         visit = PageVisit.objects.get()
         self.assertEqual(visit.status_code, 302)
-        self.assertTrue(visit.url.endswith('/copy/r/email-campaign/'))
+        self.assertEqual(visit.route, '/copy/r/email-campaign/')
 
     def test_cookie_middleware_adds_form_only_without_consent(self):
         request = add_session(self.factory.get('/'))
@@ -225,7 +226,7 @@ class PageVisitCleanupMigrationTests(TestCase):
 
         for url in removed_urls:
             PageVisit.objects.create(
-                url=url,
+                route=url,
                 status_code=200,
                 ip='203.0.113.9',
                 referrer='',
@@ -235,7 +236,7 @@ class PageVisitCleanupMigrationTests(TestCase):
             )
         for url in preserved_urls:
             PageVisit.objects.create(
-                url=url,
+                route=url,
                 status_code=200,
                 ip='203.0.113.9',
                 referrer='',
@@ -249,9 +250,105 @@ class PageVisitCleanupMigrationTests(TestCase):
         cleanup_migration.remove_non_page_visits(migration_apps, schema_editor)
 
         self.assertCountEqual(
-            PageVisit.objects.values_list('url', flat=True),
+            PageVisit.objects.values_list('route', flat=True),
             preserved_urls,
         )
+
+
+class PageVisitRouteMigrationTests(TestCase):
+    def test_existing_absolute_urls_are_reduced_to_routes(self):
+        route_migration = import_module(
+            'djangocopy.migrations.0017_pagevisit_route_only'
+        )
+        for route in (
+            'https://example.com/pricing/?campaign=summer',
+            '/already-a-route/?source=email',
+            'https://example.com',
+        ):
+            PageVisit.objects.create(
+                route=route,
+                status_code=200,
+                ip='203.0.113.9',
+                referrer='',
+                user_agent='',
+                device_info='',
+                language='en',
+            )
+
+        migration_apps = SimpleNamespace(get_model=lambda app, model: PageVisit)
+        schema_editor = SimpleNamespace(connection=connection)
+        route_migration.convert_visit_urls_to_routes(migration_apps, schema_editor)
+
+        self.assertCountEqual(
+            PageVisit.objects.values_list('route', flat=True),
+            ('/pricing/', '/already-a-route/', '/'),
+        )
+
+
+class PageVisitDashboardTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username='dashboard-admin',
+            password='password',
+        )
+        self.client.force_login(self.user)
+        self.dashboard_url = reverse('admin:djangocopy_pagevisit_dashboard')
+        self.autocomplete_url = reverse('admin:djangocopy_pagevisit_route_autocomplete')
+
+    @staticmethod
+    def make_visit(route):
+        return PageVisit.objects.create(
+            route=route,
+            status_code=200,
+            ip='203.0.113.9',
+            referrer='',
+            user_agent='',
+            device_info='',
+            language='en',
+        )
+
+    def test_route_filter_matches_the_exact_path(self):
+        self.make_visit('/pricing/')
+        self.make_visit('/pricing/')
+        self.make_visit('/old/pricing/')
+        self.make_visit('/contact/')
+
+        response = self.client.get(self.dashboard_url, {'days': 30, 'route': '/pricing/'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['route'], '/pricing/')
+        self.assertEqual(response.context['total_visits'], 2)
+        self.assertEqual(sum(row['count'] for row in response.context['top_pages']), 2)
+        self.assertContains(response, 'name="route"')
+        self.assertContains(response, 'value="/pricing/"')
+
+    def test_route_autocomplete_deduplicates_visited_routes(self):
+        self.make_visit('/guides/getting-started/')
+        self.make_visit('/guides/getting-started/')
+
+        response = self.client.get(self.autocomplete_url, {'q': 'getting-started'})
+
+        self.assertEqual(response.status_code, 200)
+        values = [result['value'] for result in response.json()['results']]
+        self.assertEqual(values.count('/guides/getting-started/'), 1)
+
+    def test_route_autocomplete_includes_unvisited_published_redirects(self):
+        Redirect.objects.create(
+            slug='summer-newsletter',
+            label='August newsletter',
+            destination_url='/pricing/',
+        )
+
+        response = self.client.get(self.autocomplete_url, {'q': 'newsletter'})
+
+        self.assertEqual(response.status_code, 200)
+        redirect_route = reverse('tracked_redirect', args=['summer-newsletter'])
+        result = next(
+            result for result in response.json()['results']
+            if result['value'] == redirect_route
+        )
+        self.assertIn('August newsletter', result['label'])
+        self.assertIn('/pricing/', result['label'])
 
 
 class RedirectAdminValidationTests(TestCase):

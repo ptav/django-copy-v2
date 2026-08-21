@@ -56,7 +56,7 @@ class TrackMiddleware:
 
         # Code to be executed for each request/response after the view is called.
         try:
-            url = request.build_absolute_uri()
+            route = request.path
             ip = get_ip_address(request)
             status_code = response.status_code
             user = request.user if request.user.is_authenticated else None
@@ -69,7 +69,7 @@ class TrackMiddleware:
             organization = ip_to_organization(ip)
 
             PageVisit.objects.create(
-                url=url,
+                route=route,
                 ip=ip,
                 user=user,
                 status_code=status_code,

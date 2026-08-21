@@ -63,6 +63,9 @@ def _is_non_page_visit(url, prefixes):
 def remove_non_page_visits(apps, schema_editor):
     PageVisit = apps.get_model('djangocopy', 'PageVisit')
     database_alias = schema_editor.connection.alias
+    route_field = 'route' if any(
+        field.name == 'route' for field in PageVisit._meta.fields
+    ) else 'url'
     prefixes = _non_page_prefixes()
     last_pk = 0
 
@@ -71,7 +74,7 @@ def remove_non_page_visits(apps, schema_editor):
             PageVisit.objects.using(database_alias)
             .filter(pk__gt=last_pk)
             .order_by('pk')
-            .values_list('pk', 'url')[:BATCH_SIZE]
+            .values_list('pk', route_field)[:BATCH_SIZE]
         )
         if not visits:
             break

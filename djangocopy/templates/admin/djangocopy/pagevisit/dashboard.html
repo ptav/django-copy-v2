@@ -12,12 +12,18 @@
 {% block content %}
 <style>
   #djangocopy-dashboard { max-width: 1100px; }
-  #djangocopy-dashboard .dc-ranges { margin-bottom: 20px; }
+  #djangocopy-dashboard .dc-filters { margin-bottom: 20px; }
+  #djangocopy-dashboard .dc-ranges { margin-bottom: 12px; }
   #djangocopy-dashboard .dc-ranges a {
     display: inline-block; margin-right: 8px; padding: 4px 10px;
     border: 1px solid var(--border-color, #ccc); border-radius: 4px; text-decoration: none;
   }
   #djangocopy-dashboard .dc-ranges a.active { background: var(--primary, #79aec8); color: var(--header-link-color, #fff); }
+  #djangocopy-dashboard .dc-route-filter { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px; }
+  #djangocopy-dashboard .dc-route-field { flex: 1 1 360px; max-width: 620px; }
+  #djangocopy-dashboard .dc-route-field label { display: block; margin-bottom: 4px; }
+  #djangocopy-dashboard .dc-route-field input { box-sizing: border-box; width: 100%; min-height: 34px; }
+  #djangocopy-dashboard .dc-clear-filter { line-height: 34px; }
   #djangocopy-dashboard .dc-stats {
     display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 28px;
   }
@@ -51,11 +57,31 @@
 </style>
 
 <div id="djangocopy-dashboard">
-  <div class="dc-ranges">
-    <a href="?days=7" class="{% if days == 7 %}active{% endif %}">{% translate "7 days" %}</a>
-    <a href="?days=30" class="{% if days == 30 %}active{% endif %}">{% translate "30 days" %}</a>
-    <a href="?days=90" class="{% if days == 90 %}active{% endif %}">{% translate "90 days" %}</a>
-    <a href="?days=365" class="{% if days == 365 %}active{% endif %}">{% translate "365 days" %}</a>
+  <div class="dc-filters">
+    <div class="dc-ranges">
+      <a href="?days=7{% if route %}&amp;route={{ route|urlencode }}{% endif %}" class="{% if days == 7 %}active{% endif %}">{% translate "7 days" %}</a>
+      <a href="?days=30{% if route %}&amp;route={{ route|urlencode }}{% endif %}" class="{% if days == 30 %}active{% endif %}">{% translate "30 days" %}</a>
+      <a href="?days=90{% if route %}&amp;route={{ route|urlencode }}{% endif %}" class="{% if days == 90 %}active{% endif %}">{% translate "90 days" %}</a>
+      <a href="?days=365{% if route %}&amp;route={{ route|urlencode }}{% endif %}" class="{% if days == 365 %}active{% endif %}">{% translate "365 days" %}</a>
+    </div>
+    <form method="get" class="dc-route-filter">
+      <input type="hidden" name="days" value="{{ days }}">
+      <div class="dc-route-field">
+        <label for="dc-route">{% translate "Route" %}</label>
+        <input
+          type="search"
+          id="dc-route"
+          name="route"
+          value="{{ route }}"
+          list="dc-route-suggestions"
+          autocomplete="off"
+          placeholder="{% translate 'Search routes' %}"
+        >
+        <datalist id="dc-route-suggestions"></datalist>
+      </div>
+      <button type="submit">{% translate "Filter" %}</button>
+      {% if route %}<a class="dc-clear-filter" href="?days={{ days }}">{% translate "Clear route" %}</a>{% endif %}
+    </form>
   </div>
 
   <div class="dc-stats">
@@ -83,7 +109,7 @@
     <ul class="dc-rows">
       {% for row in top_pages %}
       <li>
-        <div class="dc-row-head"><span>{{ row.url }}</span><span>{{ row.count }}</span></div>
+        <div class="dc-row-head"><span>{{ row.route }}</span><span>{{ row.count }}</span></div>
         <div class="dc-row-track"><div class="dc-row-fill" style="width: {{ row.pct }}%"></div></div>
       </li>
       {% empty %}
@@ -138,4 +164,42 @@
     </ul>
   </div>
 </div>
+<script>
+  (function () {
+    const input = document.getElementById('dc-route');
+    const datalist = document.getElementById('dc-route-suggestions');
+    const autocompleteUrl = '{{ route_autocomplete_url|escapejs }}';
+    let debounceTimer;
+    let controller;
+
+    function loadSuggestions() {
+      if (controller) controller.abort();
+      controller = new AbortController();
+
+      fetch(autocompleteUrl + '?q=' + encodeURIComponent(input.value), {
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+        signal: controller.signal
+      })
+        .then(function (response) { return response.json(); })
+        .then(function (data) {
+          while (datalist.firstChild) datalist.removeChild(datalist.firstChild);
+          data.results.forEach(function (result) {
+            const option = document.createElement('option');
+            option.value = result.value;
+            option.label = result.label;
+            datalist.appendChild(option);
+          });
+        })
+        .catch(function (error) {
+          if (error.name !== 'AbortError') console.error(error);
+        });
+    }
+
+    input.addEventListener('focus', loadSuggestions);
+    input.addEventListener('input', function () {
+      window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(loadSuggestions, 200);
+    });
+  }());
+</script>
 {% endblock %}

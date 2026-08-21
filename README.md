@@ -52,7 +52,8 @@ Then add `djangocopy` and it's dependencies to `INSTALLED_APPS` in the project s
 
     To enable automated page visit tracking add `djangocopy.middleware.TrackMiddleware`.
     It records top-level document requests only; supporting requests for
-    static files, media, APIs, and HTML fragments are ignored.
+    static files, media, APIs, and HTML fragments are ignored. Visits store the
+    requested site route only; hostnames and query strings are not retained.
 
     Redirect links are available at `/copy/r/<slug>/`. Create a redirect in the
     Django admin, set its destination to a site path or absolute URL, and use

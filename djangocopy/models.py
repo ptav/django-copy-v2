@@ -178,7 +178,11 @@ class PageVisit(models.Model):
     "Log of page visits. Works together with PageVisitMiddleware in middleware.py"
 
     time = models.DateTimeField(auto_now_add=True)
-    url = models.URLField()
+    route = models.CharField(
+        max_length=2048,
+        db_index=True,
+        help_text='Requested site path, without the hostname or query string.',
+    )
     status_code = models.IntegerField()
     ip = models.GenericIPAddressField()
     user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, null=True)
@@ -193,7 +197,7 @@ class PageVisit(models.Model):
     organization = models.CharField(max_length=255, blank=True, help_text="Network/ISP that owns the visitor's IP address")
 
     def __str__(self):
-        return f'{self.time} {self.user} {self.status_code} {self.url}'
+        return f'{self.time} {self.user} {self.status_code} {self.route}'
 
 
 class Redirect(models.Model):
