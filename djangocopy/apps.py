@@ -11,14 +11,14 @@ class DjangoCopyConfig(AppConfig):
 
     def ready(self):
         super().ready()
-        load_templates()
+        post_migrate.connect(load_templates, sender=self)
 
 
-# list all html files in djangocopy/templates/djangocopy/templates 
+# list all html files in djangocopy/templates/djangocopy/templates
 # and in the project templates/djangocopt/templates folders and adds
-# them to the djangocopy.models.Template model. Name is set to the 
+# them to the djangocopy.models.Template model. Name is set to the
 # Templates table.
-def load_templates():
+def load_templates(sender=None, **kwargs):
     """"""
     base_dir = os.path.dirname(importlib.util.find_spec('djangocopy').origin)
     root_dir = os.path.join(base_dir, 'templates', 'djangocopy', 'templates')
