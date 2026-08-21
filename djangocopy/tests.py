@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django import forms
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser, Group
 from django.contrib.sessions.middleware import SessionMiddleware
@@ -251,6 +252,55 @@ class PageVisitCleanupMigrationTests(TestCase):
             PageVisit.objects.values_list('url', flat=True),
             preserved_urls,
         )
+
+
+class RedirectAdminValidationTests(TestCase):
+    def setUp(self):
+        request = RequestFactory().get('/admin/djangocopy/redirect/add/')
+        request.user = get_user_model().objects.create_superuser(
+            username='redirect-admin',
+            password='password',
+        )
+        redirect_admin = admin.site._registry[Redirect]
+        self.form_class = redirect_admin.get_form(request)
+
+    def test_admin_accepts_existing_site_endpoint(self):
+        form = self.form_class(data={
+            'slug': 'internal',
+            'destination_url': 'copy/',
+            'label': '',
+        })
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_admin_rejects_missing_site_endpoint(self):
+        form = self.form_class(data={
+            'slug': 'missing',
+            'destination_url': '/not-a-real-endpoint/',
+            'label': '',
+        })
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('No endpoint matches this site path.', form.errors['destination_url'])
+
+    def test_admin_accepts_valid_external_http_url(self):
+        form = self.form_class(data={
+            'slug': 'external',
+            'destination_url': 'https://example.com/campaign',
+            'label': '',
+        })
+
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_admin_rejects_unsupported_external_url(self):
+        form = self.form_class(data={
+            'slug': 'ftp',
+            'destination_url': 'ftp://example.com/file',
+            'label': '',
+        })
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('Enter a valid HTTP(S) URL.', form.errors['destination_url'])
 
 
 class CookieConsentTests(TestCase):

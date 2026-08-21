@@ -58,7 +58,9 @@ Then add `djangocopy` and it's dependencies to `INSTALLED_APPS` in the project s
     Django admin, set its destination to a site path or absolute URL, and use
     that link in an inbound campaign. Site paths are resolved from the site
     root, so both `campaign/` and `/campaign/` redirect to `/campaign/`. The
-    redirect request is stored as a `PageVisit`, even when normal tracking is
+    admin checks that site paths match a configured endpoint and that external
+    destinations are valid HTTP(S) URLs. The redirect request is stored as a
+    `PageVisit`, even when normal tracking is
     configured to log only 200
     responses.
 

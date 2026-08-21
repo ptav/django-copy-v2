@@ -2,10 +2,13 @@ from markdown import markdown
 from json import loads
 import logging
 import os
+from urllib.parse import unquote, urlsplit
 
+from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
 from django.db import models
 from django.db.models import Q
-from django.urls import resolve
+from django.urls import Resolver404, resolve
 from django.conf import settings
 from django.utils.safestring import mark_safe
 from django.contrib.auth import get_user_model
@@ -206,6 +209,48 @@ class Redirect(models.Model):
         help_text='A site path or absolute URL to redirect visitors to.',
     )
     label = models.CharField(max_length=255, blank=True)
+
+    def clean(self):
+        super().clean()
+        destination_url = (self.destination_url or '').strip()
+        if not destination_url:
+            return
+
+        self.destination_url = destination_url
+        try:
+            destination = urlsplit(destination_url)
+        except ValueError as error:
+            raise ValidationError({
+                'destination_url': 'Enter a valid site path or HTTP(S) URL.'
+            }) from error
+
+        if destination.scheme or destination.netloc:
+            try:
+                URLValidator(schemes=('http', 'https'))(destination_url)
+            except ValidationError as error:
+                raise ValidationError({
+                    'destination_url': 'Enter a valid HTTP(S) URL.'
+                }) from error
+            return
+
+        path = unquote(destination.path or '/')
+        if not path.startswith('/'):
+            path = f'/{path}'
+
+        candidate_paths = [path]
+        if getattr(settings, 'APPEND_SLASH', False) and not path.endswith('/'):
+            candidate_paths.append(f'{path}/')
+
+        for candidate_path in candidate_paths:
+            try:
+                resolve(candidate_path)
+                return
+            except Resolver404:
+                continue
+
+        raise ValidationError({
+            'destination_url': 'No endpoint matches this site path.'
+        })
 
     def __str__(self):
         label = self.label or self.slug
