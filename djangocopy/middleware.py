@@ -44,7 +44,8 @@ class TrackMiddleware:
         # If request is unsuccesful, ignore it (default unless DJANGOCOPY_LOG_ALL_VISITS is True)
         if (not hasattr(settings, 'DJANGOCOPY_LOG_ALL_VISITS') or  \
             settings.DJANGOCOPY_LOG_ALL_VISITS == False) and \
-            response.status_code != 200:
+            response.status_code != 200 and \
+            not hasattr(response, 'djangocopy_redirect'):
             return response
 
         # Code to be executed for each request/response after the view is called.

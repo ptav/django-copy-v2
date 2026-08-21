@@ -52,6 +52,12 @@ Then add `djangocopy` and it's dependencies to `INSTALLED_APPS` in the project s
 
     To enable automated page visit tracking ad `djangocopy.middleware.TrackMiddleware`
 
+    Redirect links are available at `/copy/r/<slug>/`. Create a redirect in the
+    Django admin, set its destination to a site path or absolute URL, and use
+    that link in an inbound campaign. The redirect request is stored as a
+    `PageVisit`, even when normal tracking is configured to log only 200
+    responses.
+
 
 4. In _urls.py_ add
 

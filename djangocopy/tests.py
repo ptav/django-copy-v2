@@ -15,7 +15,7 @@ from django.utils.safestring import SafeData
 
 from .cookies import CookieConsentForm, cookie_consent, has_cookie_consent
 from .middleware import CookieConsentMiddleware, CopyMiddleware, TrackMiddleware
-from .models import Copy, Navbar, Page, PageVisit, Template
+from .models import Copy, Navbar, Page, PageVisit, Redirect, Template
 from .templatetags.djangocopy import (
     faicon,
     list_to_2_column,
@@ -24,7 +24,7 @@ from .templatetags.djangocopy import (
     numeric_range,
 )
 from .utils import choices_as_string, get_ip_address, html2text, ip_to_country_code
-from .views import BasicView, static_page
+from .views import BasicView, static_page, tracked_redirect
 
 
 __djangocopy_navbar__ = import_module(
@@ -136,6 +136,17 @@ class MiddlewareTests(TestCase):
         request.user = AnonymousUser()
         TrackMiddleware(lambda req: HttpResponse(status=404))(request)
         self.assertFalse(PageVisit.objects.exists())
+
+    def test_tracking_records_tracked_redirects(self):
+        Redirect.objects.create(slug='email-campaign', destination_url='/destination/')
+        request = add_session(self.factory.get('/copy/r/email-campaign/', REMOTE_ADDR='203.0.113.9'))
+        request.user = AnonymousUser()
+
+        TrackMiddleware(lambda req: tracked_redirect(req, 'email-campaign'))(request)
+
+        visit = PageVisit.objects.get()
+        self.assertEqual(visit.status_code, 302)
+        self.assertTrue(visit.url.endswith('/copy/r/email-campaign/'))
 
     def test_cookie_middleware_adds_form_only_without_consent(self):
         request = add_session(self.factory.get('/'))
@@ -267,6 +278,20 @@ class ViewTests(TestCase):
         response = self.client.get(reverse('static', args=['public']))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Public title')
+
+    def test_tracked_redirect_sends_visitors_to_its_destination(self):
+        Redirect.objects.create(slug='linkedin', destination_url='/campaign-page/')
+
+        response = self.client.get(reverse('tracked_redirect', args=['linkedin']))
+
+        self.assertRedirects(response, '/campaign-page/', fetch_redirect_response=False)
+
+    def test_tracked_redirect_can_target_an_absolute_url(self):
+        Redirect.objects.create(slug='external', destination_url='https://example.com/campaign')
+
+        response = self.client.get(reverse('tracked_redirect', args=['external']))
+
+        self.assertRedirects(response, 'https://example.com/campaign', fetch_redirect_response=False)
 
     def test_authenticated_page_rejects_anonymous_user(self):
         Page.objects.create(slug='private', template=self.template, authenticated=True)

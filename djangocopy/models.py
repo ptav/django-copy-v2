@@ -187,3 +187,22 @@ class PageVisit(models.Model):
 
     def __str__(self):
         return f'{self.time} {self.user} {self.status_code} {self.url}'
+
+
+class Redirect(models.Model):
+    "A trackable mapping from an inbound link to a destination URL."
+
+    slug = models.SlugField(
+        max_length=255,
+        unique=True,
+        help_text='The link will be available at /copy/r/&lt;slug&gt;/.'
+    )
+    destination_url = models.CharField(
+        max_length=2048,
+        help_text='A site path or absolute URL to redirect visitors to.',
+    )
+    label = models.CharField(max_length=255, blank=True)
+
+    def __str__(self):
+        label = self.label or self.slug
+        return f'{label} → {self.destination_url}'

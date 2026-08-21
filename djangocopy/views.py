@@ -4,7 +4,7 @@ from django.http import HttpResponseServerError
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import render, redirect
 from django.conf import settings
-from .models import Page
+from .models import Page, Redirect
 
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,17 @@ def static_page(request,slug):
     }
         
     return render(request, "djangocopy/wrapper.html", context)
+
+
+def tracked_redirect(request, slug):
+    "Redirect through a named inbound link and mark the response for tracking."
+    redirect_link = Redirect.objects.filter(slug=slug).first()
+    if redirect_link is None:
+        return HttpResponseServerError("Redirect not found")
+
+    response = redirect(redirect_link.destination_url)
+    response.djangocopy_redirect = redirect_link
+    return response
 
 
 def index(request):

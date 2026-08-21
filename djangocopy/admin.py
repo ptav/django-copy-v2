@@ -6,7 +6,7 @@ from django.contrib import admin
 
 from django_summernote.widgets import SummernoteWidget
 
-from .models import Template, Image, Page, Copy, Navbar, PageVisit
+from .models import Template, Image, Page, Copy, Navbar, PageVisit, Redirect
 
 
 
@@ -114,6 +114,9 @@ class CopyAdmin(admin.ModelAdmin):
 
 @admin.register(PageVisit)
 class PageVisitAdmin(admin.ModelAdmin):
+    list_display = ('time', 'url', 'status_code', 'user', 'ip')
+    list_filter = ('status_code', )
+    search_fields = ('url', 'referrer', 'user_agent')
     def get_readonly_fields(self, request, obj=None):
         return [f.name for f in self.model._meta.get_fields()]
 
@@ -125,6 +128,12 @@ class PageVisitAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(Redirect)
+class RedirectAdmin(admin.ModelAdmin):
+    list_display = ('slug', 'destination_url', 'label')
+    search_fields = ('slug', 'label', 'destination_url')
 
 
 @admin.register(Template)

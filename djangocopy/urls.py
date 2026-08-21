@@ -3,7 +3,7 @@ from django.urls import path, re_path
 from django.views.static import serve
 from django.conf import settings
 
-from .views import static_page, index
+from .views import static_page, index, tracked_redirect
 from .cookies import CookieConsent
 
 
@@ -21,5 +21,6 @@ from .cookies import CookieConsent
 urlpatterns = [
     path('', index, name='index'),
     path('cookie_consent/', CookieConsent(), name='cookie_consent'),
+    path('r/<slug:slug>/', tracked_redirect, name='tracked_redirect'),
     path('<str:slug>/', static_page, name='static'),
 ]
