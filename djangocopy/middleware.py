@@ -41,6 +41,12 @@ class TrackMiddleware:
         response = self.get_response(request, *args, **kwargs)
         # tracking is logged after the view is run
 
+        # A page visit is a top-level document response, not every resource the
+        # browser requests while rendering that page. Explicitly tracked
+        # redirects remain eligible regardless of their response type.
+        if not self.is_page_request(request, response):
+            return response
+
         # If request is unsuccesful, ignore it (default unless DJANGOCOPY_LOG_ALL_VISITS is True)
         if (not hasattr(settings, 'DJANGOCOPY_LOG_ALL_VISITS') or  \
             settings.DJANGOCOPY_LOG_ALL_VISITS == False) and \
@@ -82,6 +88,27 @@ class TrackMiddleware:
             pass
 
         return response
+
+    @staticmethod
+    def is_page_request(request, response):
+        if hasattr(response, 'djangocopy_redirect'):
+            return True
+
+        # Modern browsers identify the resource they are fetching. Restrict
+        # tracking to the top-level document when that signal is available.
+        fetch_destination = request.META.get('HTTP_SEC_FETCH_DEST', '').lower()
+        if fetch_destination:
+            return fetch_destination == 'document'
+
+        # Fall back to the response media type for clients which do not send
+        # Fetch Metadata headers. Exclude common legacy fragment requests too.
+        if request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest':
+            return False
+        if request.META.get('HTTP_HX_REQUEST', '').lower() == 'true':
+            return False
+
+        content_type = response.get('Content-Type', '').partition(';')[0].strip().lower()
+        return content_type in {'text/html', 'application/xhtml+xml'}
 
     @staticmethod
     def get_device_info(user_agent_string):

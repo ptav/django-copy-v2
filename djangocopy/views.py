@@ -1,5 +1,7 @@
 import logging
 from datetime import datetime
+from urllib.parse import urlsplit
+
 from django.http import HttpResponseServerError
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import render, redirect
@@ -103,7 +105,16 @@ def tracked_redirect(request, slug):
     if redirect_link is None:
         return HttpResponseServerError("Redirect not found")
 
-    response = redirect(redirect_link.destination_url)
+    destination_url = redirect_link.destination_url
+    parsed_destination = urlsplit(destination_url)
+    if (
+        not parsed_destination.scheme
+        and not parsed_destination.netloc
+        and not destination_url.startswith('/')
+    ):
+        destination_url = f'/{destination_url}'
+
+    response = redirect(destination_url)
     response.djangocopy_redirect = redirect_link
     return response
 

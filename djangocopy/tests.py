@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser, Group
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.core.exceptions import PermissionDenied
+from django.db import connection
 from django.http import HttpResponse
 from django.template import Context, Template as DjangoTemplate
 from django.test import RequestFactory, TestCase, override_settings
@@ -118,6 +119,7 @@ class MiddlewareTests(TestCase):
         request = add_session(self.factory.get(
             '/tracked/',
             REMOTE_ADDR='203.0.113.9',
+            HTTP_SEC_FETCH_DEST='document',
             HTTP_USER_AGENT='Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
             HTTP_REFERER='https://example.com/source',
         ))
@@ -130,6 +132,47 @@ class MiddlewareTests(TestCase):
         self.assertEqual(visit.status_code, 200)
         self.assertEqual(visit.referrer, 'https://example.com/source')
         self.assertEqual(visit.device_info, 'iPhone')
+
+    def test_tracking_ignores_static_and_api_responses(self):
+        requests_and_responses = (
+            ('/static/site.css', 'style', 'text/css'),
+            ('/static/site.js', 'script', 'text/javascript'),
+            ('/media/logo.png', 'image', 'image/png'),
+            ('/api/status/', 'empty', 'application/json'),
+        )
+
+        for path, fetch_destination, content_type in requests_and_responses:
+            request = add_session(self.factory.get(
+                path,
+                REMOTE_ADDR='203.0.113.9',
+                HTTP_SEC_FETCH_DEST=fetch_destination,
+            ))
+            request.user = AnonymousUser()
+            response = HttpResponse('content', content_type=content_type)
+
+            TrackMiddleware(lambda req, response=response: response)(request)
+
+        self.assertFalse(PageVisit.objects.exists())
+
+    def test_tracking_ignores_html_fragment_requests(self):
+        request = add_session(self.factory.get(
+            '/fragment/',
+            REMOTE_ADDR='203.0.113.9',
+            HTTP_SEC_FETCH_DEST='empty',
+        ))
+        request.user = AnonymousUser()
+
+        TrackMiddleware(lambda req: HttpResponse('<div>Fragment</div>'))(request)
+
+        self.assertFalse(PageVisit.objects.exists())
+
+    def test_tracking_uses_html_response_as_legacy_fallback(self):
+        request = add_session(self.factory.get('/legacy/', REMOTE_ADDR='203.0.113.9'))
+        request.user = AnonymousUser()
+
+        TrackMiddleware(lambda req: HttpResponse('<html></html>'))(request)
+
+        self.assertEqual(PageVisit.objects.count(), 1)
 
     def test_tracking_ignores_unsuccessful_visit_by_default(self):
         request = add_session(self.factory.get('/missing/', REMOTE_ADDR='203.0.113.9'))
@@ -157,6 +200,57 @@ class MiddlewareTests(TestCase):
         consented.session['cookie_consent'] = {'necessary': True}
         CookieConsentMiddleware(lambda req: HttpResponse())(consented)
         self.assertFalse(hasattr(consented, 'cookie_consent_form'))
+
+
+class PageVisitCleanupMigrationTests(TestCase):
+    @override_settings(STATIC_URL='/assets/', MEDIA_URL='/uploads/')
+    def test_cleanup_removes_non_page_visits_and_preserves_pages(self):
+        cleanup_migration = import_module(
+            'djangocopy.migrations.0016_remove_non_page_visits'
+        )
+
+        removed_urls = (
+            'https://example.com/static/site.css',
+            'https://example.com/assets/app.js?v=1',
+            'https://example.com/uploads/photo.jpg',
+            'https://example.com/api/status/',
+            'https://example.com/favicon.ico',
+        )
+        preserved_urls = (
+            'https://example.com/',
+            'https://example.com/about/',
+            'https://example.com/reports.html',
+        )
+
+        for url in removed_urls:
+            PageVisit.objects.create(
+                url=url,
+                status_code=200,
+                ip='203.0.113.9',
+                referrer='',
+                user_agent='',
+                device_info='',
+                language='en',
+            )
+        for url in preserved_urls:
+            PageVisit.objects.create(
+                url=url,
+                status_code=200,
+                ip='203.0.113.9',
+                referrer='',
+                user_agent='',
+                device_info='',
+                language='en',
+            )
+
+        migration_apps = SimpleNamespace(get_model=lambda app, model: PageVisit)
+        schema_editor = SimpleNamespace(connection=connection)
+        cleanup_migration.remove_non_page_visits(migration_apps, schema_editor)
+
+        self.assertCountEqual(
+            PageVisit.objects.values_list('url', flat=True),
+            preserved_urls,
+        )
 
 
 class CookieConsentTests(TestCase):
@@ -279,10 +373,17 @@ class ViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Public title')
 
-    def test_tracked_redirect_sends_visitors_to_its_destination(self):
-        Redirect.objects.create(slug='linkedin', destination_url='/campaign-page/')
+    def test_tracked_redirect_makes_a_relative_site_path_root_relative(self):
+        Redirect.objects.create(slug='linkedin', destination_url='campaign-page/')
 
         response = self.client.get(reverse('tracked_redirect', args=['linkedin']))
+
+        self.assertRedirects(response, '/campaign-page/', fetch_redirect_response=False)
+
+    def test_tracked_redirect_preserves_a_root_relative_site_path(self):
+        Redirect.objects.create(slug='newsletter', destination_url='/campaign-page/')
+
+        response = self.client.get(reverse('tracked_redirect', args=['newsletter']))
 
         self.assertRedirects(response, '/campaign-page/', fetch_redirect_response=False)
 

@@ -50,12 +50,16 @@ Then add `djangocopy` and it's dependencies to `INSTALLED_APPS` in the project s
 
     To enable the cookie consent form add `djangocopy.middleware.CookieConsentMiddleware`
 
-    To enable automated page visit tracking ad `djangocopy.middleware.TrackMiddleware`
+    To enable automated page visit tracking add `djangocopy.middleware.TrackMiddleware`.
+    It records top-level document requests only; supporting requests for
+    static files, media, APIs, and HTML fragments are ignored.
 
     Redirect links are available at `/copy/r/<slug>/`. Create a redirect in the
     Django admin, set its destination to a site path or absolute URL, and use
-    that link in an inbound campaign. The redirect request is stored as a
-    `PageVisit`, even when normal tracking is configured to log only 200
+    that link in an inbound campaign. Site paths are resolved from the site
+    root, so both `campaign/` and `/campaign/` redirect to `/campaign/`. The
+    redirect request is stored as a `PageVisit`, even when normal tracking is
+    configured to log only 200
     responses.
 
 
