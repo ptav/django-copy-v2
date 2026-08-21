@@ -49,14 +49,14 @@ class BasicView():
         pass
 
     def get_not_valid(self, request, form, *args, **kwargs):
-        context = {self.FORM_VAR: self.FORM_CLASS(form)}
+        context = {self.FORM_VAR: form}
         return render(request, self.FORM_TEMPLATE, context)
 
     def post_is_valid(self, request, form, *args, **kwargs):
         pass
 
     def post_not_valid(self, request, form, *args, **kwargs):
-        context = {self.FORM_TEMPLATE_VAR: self.FORM_CLASS(form)}
+        context = {self.FORM_VAR: form}
         return render(request, self.FORM_TEMPLATE, context)
 
 
@@ -64,17 +64,23 @@ def static_page(request,slug):
     try:
         page = Page.objects.filter(slug=slug).first()
         # slug has to be unique so qs will alsways be a single item
+
+        if page is None:
+            return HttpResponseServerError("Page not found")
         
         # Check group permissions
         if page.groups.count():
-            page = page.filter(groups__in=request.user.groups.all())
-            if not page:
+            if not request.user.is_authenticated or not page.groups.filter(
+                pk__in=request.user.groups.values_list('pk', flat=True)
+            ).exists():
                 raise PermissionDenied("Need additional permissions to view this page")
         
         # Check for authentication
         elif page.authenticated and not request.user.is_authenticated:
             raise PermissionDenied("Need to be signedin to view this page")
         
+    except PermissionDenied:
+        raise
     except Exception as err:
         logger.error(f"Djangocopy error: {err}")
         return HttpResponseServerError(err)
@@ -97,4 +103,3 @@ def index(request):
         return redirect('admin:index')
     else:
         return render(request, "djangocopy/default.html")
-    
